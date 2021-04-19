@@ -1,0 +1,101 @@
+# serverless.yml
+
+service: empatica-task-manager
+
+plugins:
+  - serverless-python-requirements
+  - serverless-wsgi
+  - serverless-basic-authentication
+
+custom:
+  tableName: 'tasks-table-${self:provider.stage}'
+  wsgi:
+    app: app.app
+    packRequirements: false
+  pythonRequirements:
+    dockerizePip: non-linux
+
+provider:
+  name: aws
+  runtime: python3.6
+  stage: prod
+  region: eu-central-1 #created in this region in order to decrease the latency
+  apiKeys:
+    - secretkey #needed for the POST call (add element to DB)
+  iamRoleStatements:
+    - Effect: Allow #needed for basic authentication
+      Action:
+        - apigateway:GET
+      Resource: "*"
+    - Effect: Allow #needed in order to manage the DynamoDB
+      Action:
+        - dynamodb:Query
+        - dynamodb:Scan
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+        - dynamodb:UpdateItem
+        - dynamodb:DeleteItem
+      Resource:
+       - { "Fn::GetAtt": ["UsersDynamoDBTable", "Arn" ] }
+  environment:
+    TASKS_TABLE: ${self:custom.tableName}
+
+functions:
+  app:
+    handler: wsgi.handler     
+    environment:
+      elasticURL:
+        Fn::GetAtt: [ ElasticSearchInstance , DomainEndpoint ]
+  tasksList: #first function, return the whole list of tasks
+    handler: wsgi.handler
+    events:
+      - http: 'GET /task_list'
+  addTasks: #second function, add a task to the DB
+    handler: wsgi.handler
+    events:
+      - http:
+          path: /add_task
+          method: POST
+          private: true
+
+resources:i 
+  Resources:
+    UsersDynamoDBTable: #resource creation for DynamoDB
+      Type: 'AWS::DynamoDB::Table'
+      Properties:
+        AttributeDefinitions:
+          -
+            AttributeName: task
+            AttributeType: S
+        KeySchema:
+          -
+            AttributeName: task
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: ${self:custom.tableName}
+    GatewayResponse:  #resource creation for Basic authentication
+      Type: 'AWS::ApiGateway::GatewayResponse'
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.WWW-Authenticate: "'Basic'"
+        ResponseType: UNAUTHORIZED
+        RestApiId:
+          Ref: 'ApiGatewayRestApi'
+        StatusCode: '401'
+    ElasticSearchInstance:  #resource creation for Elastic Search instance
+      Type: "AWS::Elasticsearch::Domain"
+      Properties:
+        DomainName: "empatica-elasticsearch"
+        ElasticsearchVersion: "7.9"
+        ElasticsearchClusterConfig:
+          DedicatedMasterEnabled: false
+          InstanceCount: "1"
+          ZoneAwarenessEnabled: false
+          InstanceType: "t2.small.elasticsearch"
+        EBSOptions:
+          EBSEnabled: true
+          Iops: 0
+          VolumeSize: 10
+          VolumeType: "gp2"

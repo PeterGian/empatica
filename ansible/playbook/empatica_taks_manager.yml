@@ -1,0 +1,47 @@
+---
+
+- hosts: raspberry
+  gather_facts: no
+  tasks:
+
+  - name: create empatica directory
+    file:
+      path: /EmpaticaProject
+      state: directory
+
+  - name: Copy needed file in target directory
+    copy:
+      src: /your/directory/{{ item }}
+      dest: /EmpaticaProject
+    with_items:
+       - app.py
+       - serverless.yml
+       - requirements.txt 
+
+  - name: define AWS credentials for serverless
+     command: serverless config credentials --provider aws --key XXXXXXXXXXXXXXXXXXXX --secret yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+
+  - name: project initialization
+    command: chdir=/EmpaticaProject npm init -f
+
+  - name: install all needed modules
+    command: chdir=/EmpaticaProject npm install --save-dev serverless-wsgi serverless-python-requirements serverless-basic-authentication
+
+  - name: create a new virutal environment with virtualenv
+    command: chdir=/EmpaticaProject virtualenv venv --python=python3
+
+  - name: install needed pakages
+    pip: name={{ item }} virtualenv=/root/python-venv
+    with_items:
+      - flask
+      - boto3
+      - uuid
+  
+  - name: Install requirements
+    pip:
+      requirements: /EmpaticaProject/requirements.txt
+      virtualenv: /root/python-venv
+      virtualenv_python: python3.8        
+
+  - name: and finally deploy on WAS
+    command: chdir=/EmpaticaProject sls deploy
